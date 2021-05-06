@@ -2,6 +2,7 @@
 
 import numpy as np
 from .base import Wrapper
+from .utils import num_envs
 
 
 class RewardNormalizer(Wrapper):
@@ -39,15 +40,16 @@ class RewardNormalizer(Wrapper):
         super(RewardNormalizer, self).__init__(env)
         self.beta = beta
         self.eps = eps
+        nenvs = num_envs(self.env)
         if statistics is not None and 'mean' in statistics:
             self._reward_mean = np.copy(statistics['mean'])
         else:
-            self._reward_mean = np.zeros(self.observation_space.shape)
+            self._reward_mean = np.zeros(nenvs)
 
         if statistics is not None and 'var' in statistics:
             self._reward_var = np.copy(statistics['var'])
         else:
-            self._reward_var = np.ones(self.observation_space.shape)
+            self._reward_var = np.ones(nenvs)
 
     @property
     def statistics(self):
@@ -60,10 +62,6 @@ class RewardNormalizer(Wrapper):
         self._reward_mean = self.beta * self._reward_mean + (1.0 - self.beta) * reward
         self._reward_var = self.beta * self._reward_var + (1.0 - self.beta) * np.square(reward - self._reward_mean)
         return (reward - self._reward_mean) / (np.sqrt(self._reward_var) + self.eps)
-
-    def reset(self, *args, **kwargs):
-        reward = self.env.reset(*args, **kwargs)
-        return self._reward_normalize(reward)
 
     def step(self, *args, **kwargs):
         state, reward, done, infos = self.env.step(*args, **kwargs)

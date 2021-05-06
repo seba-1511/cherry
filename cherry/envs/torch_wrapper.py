@@ -4,10 +4,7 @@ import numpy as np
 import torch as th
 import cherry as ch
 
-from gym.spaces import Discrete
-
 from .base import Wrapper
-from .utils import is_vectorized
 
 
 class Torch(Wrapper):
@@ -22,21 +19,21 @@ class Torch(Wrapper):
         env.step(action)
     """
 
+    def __init__(self, env, device='cpu', env_device='cpu'):
+        super(Torch, self).__init__(env)
+        self.device = device
+        self.env_device = env_device
+
     def _convert_state(self, state):
-        if isinstance(state, (float, int)):
-            state = ch.totensor(state)
         if isinstance(state, dict):
             state = {k: self._convert_state(state[k]) for k in state}
-        if isinstance(state, np.ndarray):
+        else:
             state = ch.totensor(state)
-        # we need to check for num_envs because self.is_vectorized returns
-        # False when the num_envs=1, but the state still needs squeezing.
-        if hasattr(self, 'num_envs') and isinstance(state, th.Tensor):
-            state = state.squeeze(0)
         return state
 
     def _convert_atomic_action(self, action):
         if isinstance(action, th.Tensor):
+            action = action.to(self.env_device)
             action = action.view(-1).cpu().detach().numpy()
         if self.discrete_action:
             if not isinstance(action, (int, float)):
@@ -59,11 +56,13 @@ class Torch(Wrapper):
         action = self._convert_action(action)
         state, reward, done, info = self.env.step(action)
         state = self._convert_state(state)
+        state = state.to(self.device)
         return state, reward, done, info
 
     def reset(self, *args, **kwargs):
         state = self.env.reset(*args, **kwargs)
         state = self._convert_state(state)
+        state = state.to(self.device)
         return state
 
     def seed(self, *args, **kwargs):

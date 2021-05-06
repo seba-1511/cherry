@@ -15,8 +15,18 @@ from collections import OrderedDict
 from gym.spaces import Box, Discrete, Dict, Tuple
 
 
+def num_envs(env):
+    if hasattr(env, 'num_envs'):
+        return env.num_envs
+    if hasattr(env, 'envs'):
+        return len(env.envs)
+    if hasattr(env, 'processes'):
+        return len(env.processes)
+    return 1
+
+
 def is_vectorized(env):
-    return hasattr(env, 'num_envs') and env.num_envs > 1
+    return num_envs(env) > 1
 
 
 def is_discrete(space, vectorized=False):

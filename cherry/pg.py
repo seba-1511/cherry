@@ -59,6 +59,7 @@ def generalized_advantage(gamma,
     dones = _reshape_helper(dones)
     values = _reshape_helper(values)
     next_value = _reshape_helper(next_value)
+    next_value = ch.totensor(next_value).reshape_as(values[0].unsqueeze(0))
 
     msg = 'rewards, values, and dones must have equal length.'
     assert len(values) == len(rewards) == len(dones), msg

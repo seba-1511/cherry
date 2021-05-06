@@ -92,7 +92,7 @@ class TestRewards(unittest.TestCase):
             )
         # Computing the discounted rewards
         # as vectorized environment
-        replay = ch.ExperienceReplay()
+        replay = ch.ExperienceReplay(vectorized=True)
         for t in range(TIME_STEPS):
             replay.append(
                 state[t, :, :], action[t, :], 
@@ -103,11 +103,9 @@ class TestRewards(unittest.TestCase):
         )
 
         for i in range(NUM_ENVS):
-            assert th.all(
-                    nonvec_discounted_rewards[i][:, 0] 
-                    == 
-                    vec_discounted_rewards[:, i],
-                )
+            self.assertTrue(
+                    close(nonvec_discounted_rewards[i], vec_discounted_rewards[:, i])
+            )
 
 
     def test_discount(self):

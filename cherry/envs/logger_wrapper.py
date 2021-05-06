@@ -160,6 +160,5 @@ class Logger(Wrapper):
             if done:
                 self.num_episodes += 1
         else:
-            __import__('pdb').set_trace()
             self.num_episodes += sum(done)
         return state, reward, done, info

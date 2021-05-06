@@ -39,23 +39,24 @@ def totensor(array, dtype=None):
         dtype = th.get_default_dtype()
     if isinstance(array, (list, tuple)):
         array = th.cat([totensor(x) for x in array], dim=0)
-    if isinstance(array, int):
-        array = float(array)
-    if isinstance(array, float):
-        array = [array, ]
-    if isinstance(array, list):
-        array = np.array(array)
-    if isinstance(array, (np.ndarray,
-                          np.bool_,
-                          np.float32,
-                          np.float64,
-                          np.int32,
-                          np.int64)):
-        if array.dtype == np.bool_:
-            array = array.astype(np.uint8)
-        array = th.tensor(array, dtype=dtype)
-        array = array.unsqueeze(0)
-    while len(array.shape) < 2:
+    else:
+        if isinstance(array, int):
+            array = float(array)
+        if isinstance(array, float):
+            array = [array, ]
+        if isinstance(array, list):
+            array = np.array(array)
+        if isinstance(array, (np.ndarray,
+                              np.bool_,
+                              np.float32,
+                              np.float64,
+                              np.int32,
+                              np.int64)):
+            if array.dtype == np.bool_:
+                array = array.astype(np.uint8)
+        if not isinstance(array, th.Tensor):
+            array = th.tensor(array, dtype=dtype)
+    while array.ndim < 2:
         array = array.unsqueeze(0)
     return array
 

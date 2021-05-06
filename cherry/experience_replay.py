@@ -41,6 +41,8 @@ class Transition(object):
     ~~~
     """
 
+    _reserved_names = ('device', '_fields')
+
     def __init__(self,
                  state,
                  action,
@@ -49,18 +51,25 @@ class Transition(object):
                  done,
                  device=None,
                  **infos):
-        self.__fields = ['state', 'action', 'reward', 'next_state', 'done']
+        self._fields = ['state', 'action', 'reward', 'next_state', 'done']
         values = [state, action, reward, next_state, done]
-        for key, val in zip(self.__fields, values):
+        for key, val in zip(self._fields, values):
             setattr(self, key, val)
         info_keys = infos.keys()
-        self.__fields += info_keys
+        self._fields += info_keys
         for key in info_keys:
             setattr(self, key, infos[key])
         self.device = device
 
+    def __setattr__(self, name, value):
+        if name not in self._reserved_names:
+            fields = getattr(self, '_fields')
+            if name not in fields:
+                self._fields.append(name)
+        return super(Transition, self).__setattr__(name, value)
+
     def __str__(self):
-        string = 'Transition(' + ', '.join(self.__fields)
+        string = 'Transition(' + ', '.join(self._fields)
         if self.device is not None:
             string += ', device=\'' + str(self.device) + '\''
         string += ')'
@@ -68,6 +77,19 @@ class Transition(object):
 
     def __repr__(self):
         return str(self)
+
+    def __getstate__(self):
+        state = {
+            key: getattr(self, key) for key in self._fields
+        }
+        return state
+
+    def __setstate__(self, state):
+        self._fields = ['state', 'action', 'reward', 'next_state', 'done']
+        for key, value in state.items():
+            setattr(self, key, value)
+            if key not in self._fields:
+                self._fields.append(key)
 
     def cpu(self):
         return self.to('cpu')
@@ -79,7 +101,7 @@ class Transition(object):
         if device is None:
             device = self.device
         new_transition = {'device': device}
-        for field in self.__fields:
+        for field in self._fields:
             value = getattr(self, field)
             if isinstance(value, th.Tensor):
                 new_transition[field] = fn(value)
@@ -142,13 +164,9 @@ class ExperienceReplay(list):
 
     **Arguments**
 
-    * **states** (Tensor, *optional*, default=None) - Tensor of states.
-    * **actions** (Tensor, *optional*, default=None) - Tensor of actions.
-    * **rewards** (Tensor, *optional*, default=None) - Tensor of rewards.
-    * **next_states** (Tensor, *optional*, default=None) - Tensor of
-      next_states.
-    * **dones** (Tensor, *optional*, default=None) - Tensor of dones.
-    * **infos** (list, *optional*, default=None) - List of infos.
+    * **storage** (list, *optional*, default=None) - A list of Transitions.
+    * **device** (torch.device, *optional*, default=None) - The device of the replay.
+    * **vectorized** (bool, *optional*, default=False) - Whether the transitions are vectorized or not.
 
     **References**
 
@@ -179,11 +197,12 @@ class ExperienceReplay(list):
     ~~~
     """
 
-    def __init__(self, storage=None, device=None):
+    def __init__(self, storage=None, device=None, vectorized=False):
         list.__init__(self)
         if storage is None:
             storage = []
         self._storage = storage
+        self.vectorized = vectorized
         self.device = device
 
     def _access_property(self, name):
@@ -195,6 +214,18 @@ class ExperienceReplay(list):
         true_size = _min_size(values[0])
         return th.cat(values, dim=0).view(len(values), *true_size)
 
+    def __getstate__(self):
+        return {
+            'storage': self._storage,
+            'vectorized': self.vectorized,
+            'device': self.device,
+        }
+
+    def __setstate__(self, state):
+        self._storage = state['storage']
+        self.vectorized = state['vectorized']
+        self.device = state['device']
+
     def __getslice__(self, i, j):
         return self.__getitem__(slice(i, j))
 
@@ -205,6 +236,8 @@ class ExperienceReplay(list):
         string = 'ExperienceReplay(' + str(len(self))
         if self.device is not None:
             string += ', device=\'' + str(self.device) + '\''
+        if self.vectorized:
+            string += ', vectorized=\'' + str(self.vectorized) + '\''
         string += ')'
         return string
 
@@ -212,8 +245,14 @@ class ExperienceReplay(list):
         return str(self)
 
     def __add__(self, other):
+        assert self.vectorized == other.vectorized, \
+            'Cannot add vectorized and non-vectorized replays.'
         storage = self._storage + other._storage
-        return ExperienceReplay(storage)
+        return ExperienceReplay(
+            storage,
+            device=self.device,
+            vectorized=self.vectorized
+        )
 
     def __iadd__(self, other):
         self._storage += other._storage
@@ -229,7 +268,7 @@ class ExperienceReplay(list):
     def __getitem__(self, key):
         value = self._storage[key]
         if isinstance(key, slice):
-            return ExperienceReplay(value)
+            return ExperienceReplay(value, device=self.device, vectorized=self.vectorized)
         return value
 
     def save(self, path):
@@ -247,7 +286,8 @@ class ExperienceReplay(list):
         replay.save('my_replay_file.pt')
         ~~~
         """
-        th.save(self._storage, path)
+        state = self.__getstate__()
+        th.save(state, path)
 
     def load(self, path):
         """
@@ -264,7 +304,8 @@ class ExperienceReplay(list):
         replay.load('my_replay_file.pt')
         ~~~
         """
-        self._storage = th.load(path)
+        state = th.load(path)
+        self.__setstate__(state)
 
     def append(self,
                state=None,
@@ -300,12 +341,24 @@ class ExperienceReplay(list):
         for key in infos:
             if _istensorable(infos[key]):
                 infos[key] = ch.totensor(infos[key])
-        sars = Transition(ch.totensor(state),
-                          ch.totensor(action),
-                          ch.totensor(reward),
-                          ch.totensor(next_state),
-                          ch.totensor(done),
-                          **infos)
+        state = ch.totensor(state)
+        action = ch.totensor(action)
+        reward = ch.totensor(reward)
+        next_state = ch.totensor(next_state)
+        done = ch.totensor(done)
+        if self.vectorized:
+            num_envs = state.shape[0]
+            action = action.reshape(num_envs, -1)
+            reward = reward.reshape(num_envs, -1)
+            done = done.reshape(num_envs, -1)
+        sars = Transition(
+            state=state,
+            action=action,
+            reward=reward,
+            next_state=next_state,
+            done=done,
+            **infos,
+        )
         self._storage.append(sars.to(self.device))
 
     def sample(self, size=1, contiguous=False, episodes=False):
@@ -326,10 +379,11 @@ class ExperienceReplay(list):
           transitions.
         """
         if len(self) < 1 or size < 1:
-            return ExperienceReplay()
+            return ExperienceReplay(vectorized=self.vectorized)
 
         indices = []
         if episodes:
+            assert not self.vectorized, 'Cannot sample episodes from vectorized replay yet.'
             if size > 1 and not contiguous:
                 replay = ExperienceReplay()
                 return sum([self.sample(1, episodes=True) for _ in range(size)], replay)
@@ -364,7 +418,11 @@ class ExperienceReplay(list):
 
         # Fill the sample
         storage = [self[idx] for idx in indices]
-        return ExperienceReplay(storage)
+        return ExperienceReplay(
+            storage=storage,
+            device=self.device,
+            vectorized=self.vectorized,
+        )
 
     def empty(self):
         """
@@ -378,6 +436,46 @@ class ExperienceReplay(list):
         ~~~
         """
         self._storage = []
+
+    def flatten(self):
+        """
+        **Description**
+
+        Returns a "flattened" version of the replay, where each transition only contains one timestep.
+
+        Assuming the original replay has N transitions each with M timesteps -- i.e. sars.state
+        with shapes (M, *state_size) -- this method returns a new replay with N*M transitions (and
+        the states have shape (*state_size)).
+
+        Note: This method breaks the timestep orders, so transitions are not consecutive anymore.
+
+        Note: No-op if not vectorized.
+
+        **Example**
+        ~~~python
+        flat_replay = replay.flatten()
+        ~~~
+        """
+        if not self.vectorized:
+            return self
+        flat_replay = ch.ExperienceReplay(device=self.device, vectorized=False)
+        storage = []
+        for sars in self._storage:
+            vec_num = sars.done.shape[0]
+            transitions = [{} for _ in range(vec_num)]
+            for field in sars._fields:
+                values = getattr(sars, field)
+                if isinstance(values, th.Tensor):
+                    values = values.chunk(vec_num, dim=0)
+                for trans, val in zip(transitions, values):
+                    trans[field] = val
+            transitions = [ch.Transition(**trans) for trans in transitions]
+            storage += transitions
+        return ch.ExperienceReplay(
+            storage=storage,
+            device=self.device,
+            vectorized=False,
+        )
 
     def cpu(self):
         return self.to('cpu')
@@ -412,12 +510,12 @@ class ExperienceReplay(list):
         """
         device, dtype, non_blocking, *_ = th._C._nn._parse_to(*args, **kwargs)
         storage = [sars.to(*args, **kwargs) for sars in self._storage]
-        return ExperienceReplay(storage, device=device)
+        return ExperienceReplay(storage, device=device, vectorized=self.vectorized)
 
     def half(self):
         storage = [sars.half() for sars in self._storage]
-        return ExperienceReplay(storage, device=self.device)
+        return ExperienceReplay(storage, device=self.device, vectorized=self.vectorized)
 
     def double(self):
         storage = [sars.double() for sars in self._storage]
-        return ExperienceReplay(storage, device=self.device)
+        return ExperienceReplay(storage, device=self.device, vectorized=self.vectorized)

@@ -294,12 +294,12 @@ class TestExperienceReplay(unittest.TestCase):
         self.assertEqual(len(replay), len(self.replay))
 
         for cr, sr in zip(replay, self.replay):
-            self.assertTrue(cr.state is sr.state)
-            self.assertTrue(cr.action is sr.action)
-            self.assertTrue(cr.next_state is sr.next_state)
-            self.assertTrue(cr.reward is sr.reward)
-            self.assertTrue(cr.vector is sr.vector)
-            self.assertTrue(cr.vector is sr.vector)
+            self.assertTrue(close(cr.state, sr.state))
+            self.assertTrue(close(cr.action, sr.action))
+            self.assertTrue(close(cr.next_state, sr.next_state))
+            self.assertTrue(close(cr.reward, sr.reward))
+            self.assertTrue(close(cr.vector, sr.vector))
+            self.assertTrue(close(cr.vector, sr.vector))
 
         # Test cuda
         if th.cuda.is_available():
@@ -368,6 +368,70 @@ class TestExperienceReplay(unittest.TestCase):
             double_dtype = cuda_replay[0].state.double().dtype
             for sars in double:
                 self.assertTrue(sars.state.dtype == double_dtype)
+
+    def test_flatten(self):
+        def original_flatten(replay):  # slow but correct
+            if not replay.vectorized:
+                return replay
+            flat_replay = ch.ExperienceReplay(device=replay.device, vectorized=False)
+            for sars in replay._storage:
+                for i in range(sars.done.shape[0]):
+                    transition = {
+                        field: getattr(sars, field)[i] for field in sars._fields
+                    }
+                    # need to add dimension back because of indexing above.
+                    transition = {
+                        k: v.unsqueeze(0)
+                        if ch._utils._istensorable(v) else v
+                        for k, v in transition.items()
+                    }
+                    flat_replay.append(**transition)
+            return flat_replay
+
+        num_envs = 8
+        batch_size = 2^5
+        replay_size = 2^6
+        s_shape = (num_envs, 9, 84, 84)
+        a_shape = (num_envs, 84)
+
+        for device in ['cpu', 'cuda']:
+            if not th.cuda.is_available() and device == 'cuda':
+                continue
+
+            # generate data
+            replay = ch.ExperienceReplay(vectorized=True)
+            for step in range(replay_size):
+                action = th.randn(*a_shape)
+                state = th.randn(*s_shape)
+                done = th.randint(low=0, high=1, size=(num_envs, 1))
+                reward = th.randn((num_envs, 1))
+                info = {
+                    'success': [0.0, ] * num_envs,
+                    'numpy': np.random.randn(num_envs, 23, 4)
+                        }
+                replay.append(state, action, reward, state, done, **info)
+            replay.to(device)
+
+            # test the two flatten are identical
+            for batch in [replay, replay.sample(batch_size)]:
+                b1 = original_flatten(batch)
+                b2 = batch.flatten()
+                for sars1, sars2 in zip(b1, b2):
+                    for field in sars1._fields:
+                        val1 = getattr(sars1, field)
+                        val2 = getattr(sars2, field)
+                        self.assertTrue(
+                            (val1.double() - val2.double()).norm().item() < 1e-8,
+                            'flatten values mismatch',
+                        )
+                        self.assertTrue(
+                            val1.shape == val2.shape,
+                            'flatten shape mismatch',
+                        )
+                        self.assertTrue(
+                            val1.device == val2.device,
+                            'flatten device misatch',
+                        )
 
 
 if __name__ == '__main__':

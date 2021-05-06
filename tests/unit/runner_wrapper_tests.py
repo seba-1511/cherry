@@ -175,7 +175,7 @@ class TestRunnerWrapper(unittest.TestCase):
                 action_shape = (1, )
             else:
                 action_shape = action_shape.shape
-            done_shape = tuple()
+            done_shape = (1, )
 
             # Check shapes
             states = replay.state()

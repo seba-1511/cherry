@@ -57,7 +57,7 @@ class TestPPOAlgorithms(unittest.TestCase):
                                            old_log_probs.view(*shape),
                                            advantages.view(*shape),
                                            clip=clip)
-                    self.assertAlmostEqual(loss.item(), ref.item())
+                    self.assertAlmostEqual(loss.item(), ref.item(), places=6)
 
     def test_ppo_value_loss(self):
         for _ in range(10):
@@ -74,7 +74,7 @@ class TestPPOAlgorithms(unittest.TestCase):
                                                 old_values.view(*shape),
                                                 rewards.view(*shape),
                                                 clip=clip)
-                    self.assertAlmostEqual(loss.item(), ref.item())
+                    self.assertAlmostEqual(loss.item(), ref.item(), places=6)
 
 
 if __name__ == '__main__':

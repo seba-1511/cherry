@@ -25,7 +25,7 @@ def flatten_episodes(replay, episodes, num_workers):
         reward = sars.reward.view(_min_size(sars.reward))
         next_state = sars.next_state.view(_min_size(sars.next_state))
         done = sars.done.view(_min_size(sars.done))
-        fields = set(sars._Transition__fields) - {'state', 'action', 'reward', 'next_state', 'done'}
+        fields = set(sars._fields) - {'state', 'action', 'reward', 'next_state', 'done'}
         infos = {f: getattr(sars, f) for f in fields}
         for worker in range(num_workers):
             infos['runner_id'] = worker
@@ -102,7 +102,7 @@ class Runner(Wrapper):
             msg = 'Either steps or episodes should be set.'
             raise Exception(msg)
 
-        replay = ch.ExperienceReplay()
+        replay = ch.ExperienceReplay(vectorized=self.is_vectorized)
         collected_episodes = 0
         collected_steps = 0
         while True:

@@ -184,6 +184,12 @@ class TanhNormal(Distribution):
         z = self.normal.sample().detach()
         return th.tanh(z)
 
+    def mean(self):
+        return th.tanh(self.normal.mean)
+
+    def mode(self):
+        return self.mean()
+
     def sample_and_log_prob(self):
         z = self.normal.sample().detach()
         value = th.tanh(z)
